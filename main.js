@@ -28,8 +28,14 @@ const BUTTON_LABELS = {
 
 const MODEL_FILES = [
   'base-body.vrm.glb',
-  'base2-body.vrm.glb'
+  'base2-body.vrm.glb',
+  'base3-body.vrm.glb',
+  'base4-body.vrm.glb'
 ];
+
+function getModelLabel(fileName) {
+  return fileName.replace('.vrm.glb', '');
+}
 
 let currentModelIndex = 0;
 let currentModelRoot = null;
@@ -65,7 +71,7 @@ function log(text) {
 }
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1a1a1f);
+scene.background = new THREE.Color(0xe9edf5);
 
 const camera = new THREE.PerspectiveCamera(
   35,
@@ -85,27 +91,38 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.12;
 controls.target.set(0, 1, 0);
 
-const grid = new THREE.GridHelper(50, 50, 0x444444, 0x222222);
+const grid = new THREE.GridHelper(50, 50, 0xb0b7c6, 0xd3d8e4);
 grid.position.y = 0.01;
-grid.material.opacity = 0.6;
+grid.material.opacity = 0.9;
 grid.material.transparent = true;
 scene.add(grid);
 
 const floorGeo = new THREE.PlaneGeometry(50, 50);
-const floorMat = new THREE.MeshBasicMaterial({
-  color: 0x111111,
-  side: THREE.DoubleSide
+const floorMat = new THREE.MeshStandardMaterial({
+  color: 0xd6dbe6,   // темнее фона
+  side: THREE.DoubleSide,
+  roughness: 0.98,
+  metalness: 0.0
 });
 const floor = new THREE.Mesh(floorGeo, floorMat);
 floor.rotation.x = -Math.PI / 2;
 floor.position.y = 0;
 scene.add(floor);
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+const ambientLight = new THREE.AmbientLight(0xffffff, 1.1);
+scene.add(ambientLight);
 
-const dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
+const hemiLight = new THREE.HemisphereLight(0xffffff, 0xe7ebf5, 1.15);
+hemiLight.position.set(0, 20, 0);
+scene.add(hemiLight);
+
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.45);
 dirLight.position.set(5, 12, 8);
 scene.add(dirLight);
+
+const fillLight = new THREE.DirectionalLight(0xffffff, 0.65);
+fillLight.position.set(-6, 8, -5);
+scene.add(fillLight);
 
 async function loadVRM(url) {
   const loader = new GLTFLoader();
@@ -148,7 +165,7 @@ function getRandomIdle(exclude = null) {
 }
 
 function updateAgentButtonLabel() {
-  const name = currentModelIndex === 0 ? 'base-body' : 'base2-body';
+  const name = getModelLabel(MODEL_FILES[currentModelIndex]);
   BUTTON_LABELS.switchAgentBtn = `🧍 Агент: ${name}`;
 
   if (!buttons.switchAgent.disabled) {
