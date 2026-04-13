@@ -11,30 +11,46 @@ const buttons = {
   kiss: document.getElementById('kissBtn'),
   walk: document.getElementById('walkBtn'),
   rumba: document.getElementById('rumbaBtn'),
-  spin: document.getElementById('spinBtn')
+  spin: document.getElementById('spinBtn'),
+  belly: document.getElementById('bellyBtn'),
+  hiphop: document.getElementById('hiphopBtn'),
+  jump: document.getElementById('jumpBtn'),
+  laugh: document.getElementById('laughBtn'),
+  funnyLaugh: document.getElementById('funnyLaughBtn'),
+  excited: document.getElementById('excitedBtn'),
+  cry: document.getElementById('cryBtn')
 };
 
 const chatMessages = document.getElementById('chatMessages');
 const chatInput = document.getElementById('chatInput');
 const sendBtn = document.getElementById('sendBtn');
+const speechBubble = document.getElementById('speechBubble');
 
 const BUTTON_LABELS = {
   switchAgentBtn: '🧍 Агент: base-body',
   kissBtn: '💋 Поцелуй',
   walkBtn: '🚶 Пройтись',
   rumbaBtn: '💃 Румба (5 раз)',
-  spinBtn: '🌀 Крутиться'
+  spinBtn: '🌀 Крутиться',
+  bellyBtn: '🪩 Belly',
+  hiphopBtn: '🎵 Hiphop',
+  jumpBtn: '🦘 Jump',
+  laughBtn: '😄 Laugh',
+  funnyLaughBtn: '🤣 Fun Laugh',
+  excitedBtn: '✨ Excited',
+  cryBtn: '😭 Cry'
 };
 
 const MODEL_FILES = [
   'base-body.vrm.glb',
   'base2-body.vrm.glb',
   'base3-body.vrm.glb',
-  'base4-body.vrm.glb'
+  'base4-body.vrm.glb',
+  'luna.vrm'
 ];
 
 function getModelLabel(fileName) {
-  return fileName.replace('.vrm.glb', '');
+  return fileName.replace('.vrm.glb', '').replace('.vrm', '');
 }
 
 let currentModelIndex = 0;
@@ -62,6 +78,9 @@ let nextIdleSwitchTime = 0;
 let lastBlinkTime = 0;
 const BLINK_INTERVAL = 4.8;
 const BLINK_DURATION = 0.13;
+
+let bubbleHideTimer = null;
+let talkingFaceInterval = null;
 
 const clock = new THREE.Clock();
 
@@ -99,7 +118,7 @@ scene.add(grid);
 
 const floorGeo = new THREE.PlaneGeometry(50, 50);
 const floorMat = new THREE.MeshStandardMaterial({
-  color: 0xd6dbe6,   // темнее фона
+  color: 0xd6dbe6,
   side: THREE.DoubleSide,
   roughness: 0.98,
   metalness: 0.0
@@ -109,19 +128,23 @@ floor.rotation.x = -Math.PI / 2;
 floor.position.y = 0;
 scene.add(floor);
 
-const ambientLight = new THREE.AmbientLight(0xffffff, 1.1);
+// базовый мягкий свет
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
 scene.add(ambientLight);
 
-const hemiLight = new THREE.HemisphereLight(0xffffff, 0xe7ebf5, 1.15);
+// небо/отражения (очень важно для мягкости)
+const hemiLight = new THREE.HemisphereLight(0xffffff, 0xdedede, 0.65);
 hemiLight.position.set(0, 20, 0);
 scene.add(hemiLight);
 
-const dirLight = new THREE.DirectionalLight(0xffffff, 1.45);
-dirLight.position.set(5, 12, 8);
+// главный свет (солнце)
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
+dirLight.position.set(5, 10, 6);
 scene.add(dirLight);
 
-const fillLight = new THREE.DirectionalLight(0xffffff, 0.65);
-fillLight.position.set(-6, 8, -5);
+// заполняющий (убирает жёсткие тени)
+const fillLight = new THREE.DirectionalLight(0xffffff, 0.35);
+fillLight.position.set(-6, 6, -4);
 scene.add(fillLight);
 
 async function loadVRM(url) {
@@ -201,10 +224,83 @@ function updateButtonStates() {
   });
 }
 
+function stopTalkingFace() {
+  if (talkingFaceInterval) {
+    clearInterval(talkingFaceInterval);
+    talkingFaceInterval = null;
+  }
+
+  if (!currentVrm?.expressionManager) return;
+  ['aa', 'ih', 'ou', 'ee', 'oh'].forEach(k => {
+    currentVrm.expressionManager.setValue(k, 0);
+  });
+}
+
+function startFakeTalkingFace() {
+  stopTalkingFace();
+
+  if (!currentVrm?.expressionManager) return;
+
+  const visemes = ['aa', 'ih', 'ou', 'ee', 'oh'];
+
+  talkingFaceInterval = setInterval(() => {
+    if (!currentVrm?.expressionManager) return;
+
+    for (const k of visemes) {
+      currentVrm.expressionManager.setValue(k, 0);
+    }
+
+    const viseme = visemes[Math.floor(Math.random() * visemes.length)];
+    const value = 0.18 + Math.random() * 0.68;
+    currentVrm.expressionManager.setValue(viseme, value);
+  }, 85);
+}
+
+function showSpeechBubble(text, duration = 4500) {
+  if (!speechBubble) return;
+
+  speechBubble.textContent = text;
+  speechBubble.style.opacity = '1';
+
+  clearTimeout(bubbleHideTimer);
+  bubbleHideTimer = setTimeout(() => {
+    speechBubble.textContent = '';
+    speechBubble.style.opacity = '0';
+  }, duration);
+}
+
+const bubbleHeadWorldPos = new THREE.Vector3();
+const bubbleHeadScreenPos = new THREE.Vector3();
+
+function updateSpeechBubblePosition() {
+  if (!speechBubble || !currentVrm) return;
+
+  const head =
+    currentVrm.humanoid?.getNormalizedBoneNode?.('head') ||
+    currentVrm.humanoid?.getRawBoneNode?.('head');
+
+  if (!head) return;
+
+  head.getWorldPosition(bubbleHeadWorldPos);
+  bubbleHeadWorldPos.y += 0.22;
+
+  bubbleHeadScreenPos.copy(bubbleHeadWorldPos).project(camera);
+
+  const x = (bubbleHeadScreenPos.x * 0.5 + 0.5) * window.innerWidth;
+  const y = (-bubbleHeadScreenPos.y * 0.5 + 0.5) * window.innerHeight;
+
+  speechBubble.style.left = `${x}px`;
+  speechBubble.style.top = `${y}px`;
+
+  const visible = bubbleHeadScreenPos.z < 1 && !!speechBubble.textContent.trim();
+  speechBubble.style.opacity = visible ? '1' : '0';
+}
+
 function cleanupCurrentModel() {
   animationQueue = [];
   activeQueueItem = null;
   isBusy = false;
+  stopTalkingFace();
   clearAllSpecialExpressions();
 
   if (mixer) {
@@ -218,9 +314,7 @@ function cleanupCurrentModel() {
     scene.remove(currentModelRoot);
 
     currentModelRoot.traverse((obj) => {
-      if (obj.geometry) {
-        obj.geometry.dispose?.();
-      }
+      if (obj.geometry) obj.geometry.dispose?.();
 
       if (obj.material) {
         if (Array.isArray(obj.material)) {
@@ -280,8 +374,17 @@ async function buildAnimationSet() {
     ['rumba', 'rumba-dance.vrma', THREE.LoopRepeat, 5],
     ['spin', 'spin.vrma', THREE.LoopOnce, 1],
     ['yawn', 'yawn.vrma', THREE.LoopOnce, 1],
+    ['belly', 'belly-dance.vrma', THREE.LoopOnce, 1],
+    ['hiphop', 'hiphop-step-dance.vrma', THREE.LoopOnce, 1],
+    ['jump', 'cross-jump.vrma', THREE.LoopOnce, 1],
+    ['laugh', 'laugh.vrma', THREE.LoopOnce, 1],
+    ['funnyLaugh', 'funniest-laugh.vrma', THREE.LoopOnce, 1],
+    ['excited', 'excided.vrma', THREE.LoopOnce, 1],
+    ['cry', 'crying.vrma', THREE.LoopOnce, 1],
     ['talk', 'talking.vrma', THREE.LoopOnce, 1],
-    ['talk1', 'talking1.vrma', THREE.LoopOnce, 1]
+    ['talk1', 'talking1.vrma', THREE.LoopOnce, 1],
+    ['talk2', 'talking2.vrma', THREE.LoopOnce, 1],
+    ['talk3', 'talking3.vrma', THREE.LoopOnce, 1]
   ];
 
   specialActions = {};
@@ -289,7 +392,8 @@ async function buildAnimationSet() {
   for (const [key, file, loopMode, reps] of specialMap) {
     const data = await loadVRMA(file);
     if (!data) {
-      throw new Error(`Не удалось загрузить спец-анимацию: ${file}`);
+      console.warn(`Не удалось загрузить спец-анимацию: ${file}`);
+      continue;
     }
 
     const clip = createVRMAnimationClip(data, currentVrm);
@@ -313,7 +417,6 @@ function fitCameraToModel(root) {
 
 function playIdle(idleAction = null) {
   const nextIdle = idleAction || getRandomIdle(currentAction);
-
   if (!nextIdle) return;
 
   if (currentAction && currentAction !== nextIdle) {
@@ -330,10 +433,10 @@ function playIdle(idleAction = null) {
 function queueAnimation(actionKey, btn, expression = null) {
   if (isSwitchingModel) return;
 
-  lastInteractionTime = clock.getElapsedTime();
-
   const action = specialActions[actionKey];
   if (!action) return;
+
+  lastInteractionTime = clock.getElapsedTime();
 
   animationQueue.push({
     key: actionKey,
@@ -349,7 +452,7 @@ function queueAnimation(actionKey, btn, expression = null) {
   }
 }
 
-function interruptWithTalking(actionKey, expression = 'fun') {
+function interruptWithTalking(actionKey, expression = 'fun', text = '') {
   if (isSwitchingModel) return;
 
   const action = specialActions[actionKey];
@@ -362,6 +465,7 @@ function interruptWithTalking(actionKey, expression = 'fun') {
   isBusy = false;
 
   clearAllSpecialExpressions();
+  stopTalkingFace();
 
   if (mixer) {
     mixer.stopAllAction();
@@ -387,6 +491,11 @@ function interruptWithTalking(actionKey, expression = 'fun') {
     setExpression(expression, 0.82);
   }
 
+  if (text) {
+    showSpeechBubble(text, Math.max(2600, text.length * 70));
+  }
+
+  startFakeTalkingFace();
   updateButtonStates();
 }
 
@@ -465,6 +574,15 @@ async function loadAgent(modelIndex) {
       }
 
       finishedItem.action.fadeOut(FADE_DURATION);
+
+      if (
+        finishedItem.key === 'talk' ||
+        finishedItem.key === 'talk1' ||
+        finishedItem.key === 'talk2' ||
+        finishedItem.key === 'talk3'
+      ) {
+        stopTalkingFace();
+      }
 
       activeQueueItem = null;
       isBusy = false;
@@ -545,6 +663,7 @@ function checkAutoYawn() {
 
   const now = clock.getElapsedTime();
   if (now - lastInteractionTime <= YAWN_TIMEOUT / 1000) return;
+  if (!specialActions.yawn) return;
 
   queueAnimation('yawn', null, 'sorrow');
   lastInteractionTime = now;
@@ -569,6 +688,14 @@ function fakeAgentReply(userText) {
     };
   }
 
+  if (clean.includes('смешно') || clean.includes('лол')) {
+    return {
+      text: 'Хах. Это правда было забавно.',
+      animation: Math.random() > 0.5 ? 'talk2' : 'talk3',
+      expression: 'fun'
+    };
+  }
+
   if (clean.includes('привет')) {
     return {
       text: 'Привет. Я тебя слушаю.',
@@ -577,9 +704,12 @@ function fakeAgentReply(userText) {
     };
   }
 
+  const talkPool = ['talk', 'talk1', 'talk2', 'talk3'];
+  const animation = talkPool[Math.floor(Math.random() * talkPool.length)];
+
   return {
     text: 'Я услышала: ' + userText,
-    animation: Math.random() > 0.5 ? 'talk' : 'talk1',
+    animation,
     expression: 'fun'
   };
 }
@@ -587,11 +717,17 @@ function fakeAgentReply(userText) {
 function handleAgentReply(reply) {
   addChatMessage(reply.text, 'agent');
 
-  if (reply.animation === 'talk1') {
-    interruptWithTalking('talk1', reply.expression);
-  } else {
-    interruptWithTalking('talk', reply.expression);
+  if (
+    reply.animation === 'talk' ||
+    reply.animation === 'talk1' ||
+    reply.animation === 'talk2' ||
+    reply.animation === 'talk3'
+  ) {
+    interruptWithTalking(reply.animation, reply.expression, reply.text);
+    return;
   }
+
+  showSpeechBubble(reply.text, Math.max(2600, reply.text.length * 70));
 }
 
 function handleSendMessage() {
@@ -605,7 +741,7 @@ function handleSendMessage() {
 
   setTimeout(() => {
     handleAgentReply(reply);
-  }, 350);
+  }, 280);
 }
 
 buttons.switchAgent.addEventListener('click', async () => {
@@ -627,6 +763,34 @@ buttons.rumba.addEventListener('click', () => {
 
 buttons.spin.addEventListener('click', () => {
   queueAnimation('spin', buttons.spin, 'fun');
+});
+
+buttons.belly.addEventListener('click', () => {
+  queueAnimation('belly', buttons.belly, 'fun');
+});
+
+buttons.hiphop.addEventListener('click', () => {
+  queueAnimation('hiphop', buttons.hiphop, 'fun');
+});
+
+buttons.jump.addEventListener('click', () => {
+  queueAnimation('jump', buttons.jump, 'fun');
+});
+
+buttons.laugh.addEventListener('click', () => {
+  queueAnimation('laugh', buttons.laugh, 'fun');
+});
+
+buttons.funnyLaugh.addEventListener('click', () => {
+  queueAnimation('funnyLaugh', buttons.funnyLaugh, 'fun');
+});
+
+buttons.excited.addEventListener('click', () => {
+  queueAnimation('excited', buttons.excited, 'fun');
+});
+
+buttons.cry.addEventListener('click', () => {
+  queueAnimation('cry', buttons.cry, 'sorrow');
 });
 
 sendBtn.addEventListener('click', handleSendMessage);
@@ -663,6 +827,7 @@ function animate() {
 
   switchRandomIdle();
   checkAutoYawn();
+  updateSpeechBubblePosition();
 
   controls.update();
   renderer.render(scene, camera);
