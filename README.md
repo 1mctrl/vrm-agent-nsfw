@@ -1,4 +1,3 @@
-````md
 # Luna VRM Agent
 
 Браузерный 3D-персонаж на базе VRM-модели с LLM-чатом, анимациями, памятью и интеграцией с Telegram.
@@ -47,7 +46,6 @@ https://t.me/lovelyluna213
 ├── styles.css
 ├── package.json
 └── .env                          # секреты, игнорируется git
-````
 
 ---
 
