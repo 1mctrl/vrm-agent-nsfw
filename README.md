@@ -1,21 +1,11 @@
-# Preview
+# Preview  
 
-https://github.com/user-attachments/assets/1f32f51e-e9fe-49e7-bc06-21d9f454f10e  
+https://github.com/user-attachments/assets/56abce79-b443-4c9c-a16a-98dcd3a4db8e  
 
-
-https://github.com/user-attachments/assets/6c2aff66-e78d-4acb-aa33-066e9a71b369
-
-<img width="1024" height="848" alt="image" src="https://github.com/user-attachments/assets/45ba281f-0ba9-45e3-9c2e-2b9a94f9c960" />
+<img width="1127" height="920" alt="image" src="https://github.com/user-attachments/assets/c8cc9e23-46ff-4d75-b561-6d9af30fbfbd" />
 
 
-there are 4 models so far  
-i downloaded them from vroid for free (except luna, wich i made by myself in vroid studio)  
-so dont judge if you think that models are ugly.   
-also animation buttons are temporary, to test animations(there not much animations yet),  
-after adding llm these button wont be here.  
-also animation swithcing maybe a little strange due to strange animation que conrol.  
-
-
-
-
-
+ок вот ллм  версия.  
+я использовал api от openai.  
+и плюс сунул telegram api и открыл для нее аккаунт https://t.me/lovelyluna213  
+и у меня проблемы с сетью из-за чего fetch failed, но это только у меня думаю.
