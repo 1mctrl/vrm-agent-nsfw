@@ -9,3 +9,4 @@ https://github.com/user-attachments/assets/56abce79-b443-4c9c-a16a-98dcd3a4db8e
 я использовал api от openai.  
 и плюс сунул telegram api и открыл для нее аккаунт https://t.me/lovelyluna213  
 и у меня проблемы с сетью из-за чего fetch failed, но это только у меня думаю.
+видео было больщим, поэтому я сжал а качество чуть упало
