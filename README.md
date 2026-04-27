@@ -26,7 +26,7 @@ https://github.com/user-attachments/assets/56abce79-b443-4c9c-a16a-98dcd3a4db8e
 
 Telegram аккаунт Luna:
 
-https://t.me/lovely_luna213
+https://t.me/lovely_luna12
 
 ---
 
