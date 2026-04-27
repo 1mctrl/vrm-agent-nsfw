@@ -33,7 +33,6 @@ https://t.me/lovelyluna213
 
 # Структура проекта
 
-```txt
 .
 ├── assets/
 │   ├── animations/               # VRMA анимации
