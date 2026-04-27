@@ -5,92 +5,215 @@ import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { VRMAnimationLoaderPlugin, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
 
 const msg = document.getElementById('msg');
-
-const buttons = {
-  switchAgent: document.getElementById('switchAgentBtn'),
-  kiss: document.getElementById('kissBtn'),
-  walk: document.getElementById('walkBtn'),
-  rumba: document.getElementById('rumbaBtn'),
-  spin: document.getElementById('spinBtn'),
-  belly: document.getElementById('bellyBtn'),
-  hiphop: document.getElementById('hiphopBtn'),
-  jump: document.getElementById('jumpBtn'),
-  laugh: document.getElementById('laughBtn'),
-  funnyLaugh: document.getElementById('funnyLaughBtn'),
-  excited: document.getElementById('excitedBtn'),
-  cry: document.getElementById('cryBtn')
-};
-
 const chatMessages = document.getElementById('chatMessages');
 const chatInput = document.getElementById('chatInput');
 const sendBtn = document.getElementById('sendBtn');
-const speechBubble = document.getElementById('speechBubble');
 
-const BUTTON_LABELS = {
-  switchAgentBtn: '🧍 Агент: base-body',
-  kissBtn: '💋 Поцелуй',
-  walkBtn: '🚶 Пройтись',
-  rumbaBtn: '💃 Румба (5 раз)',
-  spinBtn: '🌀 Крутиться',
-  bellyBtn: '🪩 Belly',
-  hiphopBtn: '🎵 Hiphop',
-  jumpBtn: '🦘 Jump',
-  laughBtn: '😄 Laugh',
-  funnyLaughBtn: '🤣 Fun Laugh',
-  excitedBtn: '✨ Excited',
-  cryBtn: '😭 Cry'
-};
+const MODEL_FILE = 'luna.vrm';
+const SKY_FILE = 'assets/fantasy_landscape_3.glb';
+const WORLD_FILE = 'assets/stylised_sky_player_home_dioroma.glb';
 
-const MODEL_FILES = [
-  'base-body.vrm.glb',
-  'base2-body.vrm.glb',
-  'base3-body.vrm.glb',
-  'base4-body.vrm.glb',
-  'luna.vrm'
-];
+const LUNA_SCALE = 1.0;
+const LUNA_POSITION = new THREE.Vector3(0.30, 9.9, 0.15);
+const LUNA_ROTATION_Y = 0;
 
-function getModelLabel(fileName) {
-  return fileName.replace('.vrm.glb', '').replace('.vrm', '');
-}
+const CAMERA_POSITION = new THREE.Vector3(0.45, 10.8, 9.0);
+const CAMERA_TARGET = new THREE.Vector3(0.45, 10.8, 0.15);
 
-let currentModelIndex = 0;
-let currentModelRoot = null;
+const INIT_SILENCE_MS = 60000;
+const INIT_COOLDOWN_MS = 120000;
+const INIT_CHANCE = 0.4;
+
+const IDLE_MIN_TIME = 13;
+const IDLE_MAX_TIME = 20;
+const YAWN_TIMEOUT = 50;
+const FADE_DURATION = 0.45;
+const BLINK_INTERVAL = 2.5;
+const BLINK_DURATION = 0.17;
+
 let currentVrm = null;
+let currentRoot = null;
 let mixer = null;
 let currentAction = null;
 
 let idleActions = [];
 let specialActions = {};
-let animationQueue = [];
-let activeQueueItem = null;
+
+let lastUserMessageAt = Date.now();
+let lastInitiativeAt = 0;
+let isUserTyping = false;
+let typingTimer = null;
 
 let isBusy = false;
-let isSwitchingModel = false;
+let isLoading = false;
 let lastInteractionTime = 0;
-
-const IDLE_MIN_TIME = 13000;
-const IDLE_MAX_TIME = 20000;
-const YAWN_TIMEOUT = 10500;
-const FADE_DURATION = 0.65;
-
 let nextIdleSwitchTime = 0;
-
 let lastBlinkTime = 0;
-const BLINK_INTERVAL = 4.8;
-const BLINK_DURATION = 0.13;
-
-let bubbleHideTimer = null;
 let talkingFaceInterval = null;
 
 const clock = new THREE.Clock();
 
 function log(text) {
   console.log(text);
-  msg.textContent = text;
+  if (msg) msg.textContent = text;
 }
 
+function addChatMessage(text, role) {
+  if (!chatMessages) return;
+
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  div.textContent = text;
+
+  chatMessages.appendChild(div);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function setExpression(name, value) {
+  if (!currentVrm?.expressionManager || !name) return;
+  currentVrm.expressionManager.setValue(name, value);
+}
+
+function clearExpressions() {
+  setExpression('smile', 0);
+  setExpression('sorrow', 0);
+}
+
+function applyEmotion(expression) {
+  clearExpressions();
+
+  if (expression === 'smile') setExpression('smile', 0.82);
+  if (expression === 'sorrow') setExpression('sorrow', 0.82);
+}
+
+function stopTalkingFace() {
+  if (talkingFaceInterval) {
+    clearInterval(talkingFaceInterval);
+    talkingFaceInterval = null;
+  }
+
+  if (!currentVrm?.expressionManager) return;
+
+  for (const v of ['aa', 'ih', 'ou', 'ee', 'oh']) {
+    currentVrm.expressionManager.setValue(v, 0);
+  }
+}
+
+function startTalkingFace() {
+  stopTalkingFace();
+
+  if (!currentVrm?.expressionManager) return;
+
+  const visemes = ['aa', 'ih', 'ou', 'ee', 'oh'];
+
+  talkingFaceInterval = setInterval(() => {
+    if (!currentVrm?.expressionManager) return;
+
+    for (const v of visemes) {
+      currentVrm.expressionManager.setValue(v, 0);
+    }
+
+    const pick = visemes[Math.floor(Math.random() * visemes.length)];
+    currentVrm.expressionManager.setValue(pick, 0.2 + Math.random() * 0.65);
+  }, 85);
+}
+
+async function loadVRM(url) {
+  const loader = new GLTFLoader();
+  loader.register((parser) => new VRMLoaderPlugin(parser));
+  return await loader.loadAsync(url);
+}
+
+async function loadVRMA(url) {
+  const loader = new GLTFLoader();
+  loader.register((parser) => new VRMAnimationLoaderPlugin(parser));
+
+  const gltf = await loader.loadAsync(url);
+  return gltf.userData.vrmAnimations?.[0];
+}
+
+async function loadSkySphere(url) {
+  const loader = new GLTFLoader();
+  const gltf = await loader.loadAsync(url);
+
+  const sky = gltf.scene;
+  sky.position.set(0, 5, 0);
+  sky.scale.setScalar(500);
+  sky.renderOrder = -999;
+
+  sky.traverse((obj) => {
+    if (obj.isMesh && obj.material) {
+      obj.material.side = THREE.BackSide;
+      obj.material.depthWrite = false;
+      obj.material.depthTest = false;
+      obj.material.fog = false;
+    }
+  });
+
+  scene.add(sky);
+  return sky;
+}
+
+async function loadWorld(url) {
+  const loader = new GLTFLoader();
+  const gltf = await loader.loadAsync(url);
+
+  const world = gltf.scene;
+
+  const box = new THREE.Box3().setFromObject(world);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+
+  const targetHeight = 20.0;
+  const scale = targetHeight / size.y;
+
+  world.scale.setScalar(scale);
+
+  world.position.set(
+    -center.x * scale,
+    -box.min.y * scale,
+    -center.z * scale
+  );
+
+  world.traverse((obj) => {
+    if (obj.isMesh) {
+      obj.castShadow = true;
+      obj.receiveShadow = true;
+    }
+  });
+
+  scene.add(world);
+  return world;
+}
+
+async function loadAction(file, key, loopMode = THREE.LoopOnce, repetitions = 1) {
+  try {
+    const data = await loadVRMA(file);
+
+    if (!data) {
+      console.warn(`VRMA not found in ${file}`);
+      return null;
+    }
+
+    const clip = createVRMAnimationClip(data, currentVrm);
+    const action = mixer.clipAction(clip);
+
+    action.clampWhenFinished = true;
+    action.setLoop(loopMode, repetitions);
+
+    if (key) specialActions[key] = action;
+
+    return action;
+  } catch (err) {
+    console.warn(`Failed to load ${file}:`, err);
+    return null;
+  }
+}
+
+// ===== scene =====
+
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xe9edf5);
+scene.background = new THREE.Color(0x0b1020);
 
 const camera = new THREE.PerspectiveCamera(
   35,
@@ -103,19 +226,22 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.9;
+
+renderer.domElement.style.position = 'fixed';
+renderer.domElement.style.left = '0';
+renderer.domElement.style.top = '0';
+renderer.domElement.style.zIndex = '1';
+
 document.body.appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.12;
-controls.target.set(0, 1, 0);
+controls.target.copy(CAMERA_TARGET);
 
-const grid = new THREE.GridHelper(50, 50, 0xb0b7c6, 0xd3d8e4);
-grid.position.y = 0.01;
-grid.material.opacity = 0.9;
-grid.material.transparent = true;
-scene.add(grid);
-
+// fallback floor, выключен, потому что есть домик/world
 const floorGeo = new THREE.PlaneGeometry(50, 50);
 const floorMat = new THREE.MeshStandardMaterial({
   color: 0xd6dbe6,
@@ -126,298 +252,39 @@ const floorMat = new THREE.MeshStandardMaterial({
 const floor = new THREE.Mesh(floorGeo, floorMat);
 floor.rotation.x = -Math.PI / 2;
 floor.position.y = 0;
-scene.add(floor);
+// scene.add(floor);
 
-// базовый мягкий свет
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
-scene.add(ambientLight);
+// lights
+scene.add(new THREE.AmbientLight(0xffffff, 0.75));
 
-// небо/отражения (очень важно для мягкости)
 const hemiLight = new THREE.HemisphereLight(0xffffff, 0xdedede, 0.65);
 hemiLight.position.set(0, 20, 0);
 scene.add(hemiLight);
 
-// главный свет (солнце)
 const dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
 dirLight.position.set(5, 10, 6);
 scene.add(dirLight);
 
-// заполняющий (убирает жёсткие тени)
 const fillLight = new THREE.DirectionalLight(0xffffff, 0.35);
 fillLight.position.set(-6, 6, -4);
 scene.add(fillLight);
 
-async function loadVRM(url) {
-  const loader = new GLTFLoader();
-  loader.register(parser => new VRMLoaderPlugin(parser));
-  return await loader.loadAsync(url);
-}
-
-async function loadVRMA(url) {
-  const loader = new GLTFLoader();
-  loader.register(parser => new VRMAnimationLoaderPlugin(parser));
-  const gltf = await loader.loadAsync(url);
-  return gltf.userData.vrmAnimations?.[0];
-}
-
-function scheduleNextIdleSwitch() {
-  nextIdleSwitchTime =
-    clock.getElapsedTime() +
-    (IDLE_MIN_TIME + Math.random() * (IDLE_MAX_TIME - IDLE_MIN_TIME)) / 1000;
-}
-
-function setExpression(name, value) {
-  if (!currentVrm?.expressionManager || !name) return;
-  currentVrm.expressionManager.setValue(name, value);
-}
-
-function clearAllSpecialExpressions() {
-  if (!currentVrm?.expressionManager) return;
-  setExpression('fun', 0.0);
-  setExpression('sorrow', 0.0);
-}
+// ===== animation logic =====
 
 function getRandomIdle(exclude = null) {
   if (idleActions.length === 0) return null;
   if (idleActions.length === 1) return idleActions[0];
 
-  const filtered = idleActions.filter(a => a !== exclude);
-  if (filtered.length === 0) return idleActions[0];
-
+  const filtered = idleActions.filter((a) => a !== exclude);
   return filtered[Math.floor(Math.random() * filtered.length)];
-}
-
-function updateAgentButtonLabel() {
-  const name = getModelLabel(MODEL_FILES[currentModelIndex]);
-  BUTTON_LABELS.switchAgentBtn = `🧍 Агент: ${name}`;
-
-  if (!buttons.switchAgent.disabled) {
-    buttons.switchAgent.textContent = BUTTON_LABELS.switchAgentBtn;
-  }
-}
-
-function updateButtonStates() {
-  const busyButtons = new Set();
-
-  if (activeQueueItem?.btn) {
-    busyButtons.add(activeQueueItem.btn);
-  }
-
-  for (const item of animationQueue) {
-    if (item.btn) busyButtons.add(item.btn);
-  }
-
-  Object.values(buttons).forEach(btn => {
-    if (btn === buttons.switchAgent) {
-      btn.disabled = isSwitchingModel;
-      btn.textContent = isSwitchingModel
-        ? BUTTON_LABELS[btn.id] + '…'
-        : BUTTON_LABELS[btn.id];
-      return;
-    }
-
-    const disabled = isSwitchingModel || busyButtons.has(btn);
-    btn.disabled = disabled;
-    btn.textContent = disabled
-      ? BUTTON_LABELS[btn.id] + '…'
-      : BUTTON_LABELS[btn.id];
-  });
-}
-
-function stopTalkingFace() {
-  if (talkingFaceInterval) {
-    clearInterval(talkingFaceInterval);
-    talkingFaceInterval = null;
-  }
-
-  if (!currentVrm?.expressionManager) return;
-  ['aa', 'ih', 'ou', 'ee', 'oh'].forEach(k => {
-    currentVrm.expressionManager.setValue(k, 0);
-  });
-}
-
-function startFakeTalkingFace() {
-  stopTalkingFace();
-
-  if (!currentVrm?.expressionManager) return;
-
-  const visemes = ['aa', 'ih', 'ou', 'ee', 'oh'];
-
-  talkingFaceInterval = setInterval(() => {
-    if (!currentVrm?.expressionManager) return;
-
-    for (const k of visemes) {
-      currentVrm.expressionManager.setValue(k, 0);
-    }
-
-    const viseme = visemes[Math.floor(Math.random() * visemes.length)];
-    const value = 0.18 + Math.random() * 0.68;
-    currentVrm.expressionManager.setValue(viseme, value);
-  }, 85);
-}
-
-function showSpeechBubble(text, duration = 4500) {
-  if (!speechBubble) return;
-
-  speechBubble.textContent = text;
-  speechBubble.style.opacity = '1';
-
-  clearTimeout(bubbleHideTimer);
-  bubbleHideTimer = setTimeout(() => {
-    speechBubble.textContent = '';
-    speechBubble.style.opacity = '0';
-  }, duration);
-}
-
-const bubbleHeadWorldPos = new THREE.Vector3();
-const bubbleHeadScreenPos = new THREE.Vector3();
-
-function updateSpeechBubblePosition() {
-  if (!speechBubble || !currentVrm) return;
-
-  const head =
-    currentVrm.humanoid?.getNormalizedBoneNode?.('head') ||
-    currentVrm.humanoid?.getRawBoneNode?.('head');
-
-  if (!head) return;
-
-  head.getWorldPosition(bubbleHeadWorldPos);
-  bubbleHeadWorldPos.y += 0.22;
-
-  bubbleHeadScreenPos.copy(bubbleHeadWorldPos).project(camera);
-
-  const x = (bubbleHeadScreenPos.x * 0.5 + 0.5) * window.innerWidth;
-  const y = (-bubbleHeadScreenPos.y * 0.5 + 0.5) * window.innerHeight;
-
-  speechBubble.style.left = `${x}px`;
-  speechBubble.style.top = `${y}px`;
-
-  const visible = bubbleHeadScreenPos.z < 1 && !!speechBubble.textContent.trim();
-  speechBubble.style.opacity = visible ? '1' : '0';
-}
-
-function cleanupCurrentModel() {
-  animationQueue = [];
-  activeQueueItem = null;
-  isBusy = false;
-  stopTalkingFace();
-  clearAllSpecialExpressions();
-
-  if (mixer) {
-    mixer.stopAllAction();
-    if (currentModelRoot) {
-      mixer.uncacheRoot(currentModelRoot);
-    }
-  }
-
-  if (currentModelRoot) {
-    scene.remove(currentModelRoot);
-
-    currentModelRoot.traverse((obj) => {
-      if (obj.geometry) obj.geometry.dispose?.();
-
-      if (obj.material) {
-        if (Array.isArray(obj.material)) {
-          obj.material.forEach(mat => mat.dispose?.());
-        } else {
-          obj.material.dispose?.();
-        }
-      }
-    });
-  }
-
-  currentModelRoot = null;
-  currentVrm = null;
-  mixer = null;
-  currentAction = null;
-  idleActions = [];
-  specialActions = {};
-}
-
-function createAction(clip, loopMode, repetitions = 1) {
-  const action = mixer.clipAction(clip);
-  action.clampWhenFinished = true;
-  action.setLoop(loopMode, repetitions);
-  return action;
-}
-
-async function buildAnimationSet() {
-  const idleFiles = [
-    'idle.vrma',
-    'happy-idle.vrma',
-    'happy-idle2.vrma',
-    'sad-idle.vrma'
-  ];
-
-  idleActions = [];
-
-  for (const file of idleFiles) {
-    const data = await loadVRMA(file);
-    if (!data) {
-      console.warn(`Не удалось загрузить idle анимацию: ${file}`);
-      continue;
-    }
-
-    const clip = createVRMAnimationClip(data, currentVrm);
-    const action = mixer.clipAction(clip);
-    action.setLoop(THREE.LoopRepeat, Infinity);
-    idleActions.push(action);
-  }
-
-  if (idleActions.length === 0) {
-    throw new Error('Не удалось загрузить ни одной idle-анимации');
-  }
-
-  const specialMap = [
-    ['kiss', 'air-kiss2.vrma', THREE.LoopOnce, 1],
-    ['walk', 'walk-around.vrma', THREE.LoopOnce, 1],
-    ['rumba', 'rumba-dance.vrma', THREE.LoopRepeat, 5],
-    ['spin', 'spin.vrma', THREE.LoopOnce, 1],
-    ['yawn', 'yawn.vrma', THREE.LoopOnce, 1],
-    ['belly', 'belly-dance.vrma', THREE.LoopOnce, 1],
-    ['hiphop', 'hiphop-step-dance.vrma', THREE.LoopOnce, 1],
-    ['jump', 'cross-jump.vrma', THREE.LoopOnce, 1],
-    ['laugh', 'laugh.vrma', THREE.LoopOnce, 1],
-    ['funnyLaugh', 'funniest-laugh.vrma', THREE.LoopOnce, 1],
-    ['excited', 'excided.vrma', THREE.LoopOnce, 1],
-    ['cry', 'crying.vrma', THREE.LoopOnce, 1],
-    ['talk', 'talking.vrma', THREE.LoopOnce, 1],
-    ['talk1', 'talking1.vrma', THREE.LoopOnce, 1],
-    ['talk2', 'talking2.vrma', THREE.LoopOnce, 1],
-    ['talk3', 'talking3.vrma', THREE.LoopOnce, 1]
-  ];
-
-  specialActions = {};
-
-  for (const [key, file, loopMode, reps] of specialMap) {
-    const data = await loadVRMA(file);
-    if (!data) {
-      console.warn(`Не удалось загрузить спец-анимацию: ${file}`);
-      continue;
-    }
-
-    const clip = createVRMAnimationClip(data, currentVrm);
-    specialActions[key] = createAction(clip, loopMode, reps);
-  }
-}
-
-function fitCameraToModel(root) {
-  const box = new THREE.Box3().setFromObject(root);
-  const size = box.getSize(new THREE.Vector3());
-  const center = box.getCenter(new THREE.Vector3());
-
-  root.position.set(-center.x, -box.min.y, -center.z);
-  root.rotation.y = Math.PI;
-
-  const height = Math.max(size.y, 1);
-  camera.position.set(0, height * 0.9, height * 2.2);
-  controls.target.set(0, height * 0.5, 0);
-  controls.update();
 }
 
 function playIdle(idleAction = null) {
   const nextIdle = idleAction || getRandomIdle(currentAction);
   if (!nextIdle) return;
+
+  stopTalkingFace();
+  clearExpressions();
 
   if (currentAction && currentAction !== nextIdle) {
     currentAction.fadeOut(FADE_DURATION);
@@ -427,206 +294,80 @@ function playIdle(idleAction = null) {
   }
 
   currentAction = nextIdle;
-  scheduleNextIdleSwitch();
+
+  nextIdleSwitchTime =
+    clock.getElapsedTime() +
+    (IDLE_MIN_TIME + Math.random() * (IDLE_MAX_TIME - IDLE_MIN_TIME));
 }
 
-function queueAnimation(actionKey, btn, expression = null) {
-  if (isSwitchingModel) return;
-
+function playSpecialAction(actionKey, expression = 'smile') {
   const action = specialActions[actionKey];
-  if (!action) return;
 
-  lastInteractionTime = clock.getElapsedTime();
-
-  animationQueue.push({
-    key: actionKey,
-    action,
-    btn,
-    expression
-  });
-
-  updateButtonStates();
-
-  if (!isBusy) {
-    processQueue();
+  if (!action) {
+    console.warn(`Unknown action: ${actionKey}`);
+    playIdle();
+    return;
   }
-}
 
-function interruptWithTalking(actionKey, expression = 'fun', text = '') {
-  if (isSwitchingModel) return;
-
-  const action = specialActions[actionKey];
-  if (!action) return;
-
+  isBusy = true;
   lastInteractionTime = clock.getElapsedTime();
 
-  animationQueue = [];
-  activeQueueItem = null;
-  isBusy = false;
-
-  clearAllSpecialExpressions();
   stopTalkingFace();
+  clearExpressions();
 
-  if (mixer) {
-    mixer.stopAllAction();
-  }
+  if (mixer) mixer.stopAllAction();
 
   action.reset();
   action.enabled = true;
-  action.clampWhenFinished = true;
   action.setEffectiveWeight(1);
   action.setEffectiveTimeScale(1);
   action.play();
 
   currentAction = action;
-  isBusy = true;
-  activeQueueItem = {
-    key: actionKey,
-    action,
-    btn: null,
-    expression
-  };
+  applyEmotion(expression);
 
-  if (expression) {
-    setExpression(expression, 0.82);
-  }
-
-  if (text) {
-    showSpeechBubble(text, Math.max(2600, text.length * 70));
-  }
-
-  startFakeTalkingFace();
-  updateButtonStates();
+  if (actionKey.startsWith('talk')) startTalkingFace();
 }
 
-function processQueue() {
-  if (isBusy || isSwitchingModel) return;
-  if (animationQueue.length === 0) return;
+function inferAnimation(reply) {
+  const a = reply?.animation;
+  if (a && specialActions[a]) return a;
 
-  isBusy = true;
-  activeQueueItem = animationQueue.shift();
+  const text = String(reply?.text || '');
 
-  const { action, expression } = activeQueueItem;
-  const prevAction = currentAction;
+  if (text.length > 120 && specialActions.talk3) return 'talk3';
+  if (text.length > 70 && specialActions.talk2) return 'talk2';
+  if (specialActions.talk1 && Math.random() > 0.5) return 'talk1';
 
-  clearAllSpecialExpressions();
-
-  if (prevAction && prevAction !== action) {
-    prevAction.fadeOut(FADE_DURATION);
-  }
-
-  action.reset();
-  action.enabled = true;
-  action.clampWhenFinished = true;
-  action.setEffectiveWeight(1);
-  action.setEffectiveTimeScale(1);
-
-  if (prevAction && prevAction !== action) {
-    action.syncWith(prevAction);
-    action.fadeIn(FADE_DURATION);
-  }
-
-  action.play();
-  currentAction = action;
-
-  if (expression) {
-    setExpression(expression, 0.82);
-  }
-
-  updateButtonStates();
+  return specialActions.talk ? 'talk' : 'none';
 }
 
-async function loadAgent(modelIndex) {
-  isSwitchingModel = true;
-  updateButtonStates();
-
-  try {
-    const modelFile = MODEL_FILES[modelIndex];
-    log(`Загрузка агента: ${modelFile}`);
-
-    cleanupCurrentModel();
-
-    const vrmGltf = await loadVRM(modelFile);
-    currentVrm = vrmGltf.userData.vrm;
-
-    if (!currentVrm) {
-      throw new Error(`VRM runtime не найден в ${modelFile}`);
-    }
-
-    VRMUtils.removeUnnecessaryVertices(vrmGltf.scene);
-    VRMUtils.removeUnnecessaryJoints(vrmGltf.scene);
-
-    currentModelRoot = currentVrm.scene;
-    scene.add(currentModelRoot);
-
-    fitCameraToModel(currentModelRoot);
-
-    mixer = new THREE.AnimationMixer(currentModelRoot);
-
-    mixer.addEventListener('finished', (event) => {
-      if (!activeQueueItem) return;
-      if (event.action !== activeQueueItem.action) return;
-
-      const finishedItem = activeQueueItem;
-
-      if (finishedItem.expression) {
-        setExpression(finishedItem.expression, 0.0);
-      }
-
-      finishedItem.action.fadeOut(FADE_DURATION);
-
-      if (
-        finishedItem.key === 'talk' ||
-        finishedItem.key === 'talk1' ||
-        finishedItem.key === 'talk2' ||
-        finishedItem.key === 'talk3'
-      ) {
-        stopTalkingFace();
-      }
-
-      activeQueueItem = null;
-      isBusy = false;
-      updateButtonStates();
-
-      if (animationQueue.length > 0) {
-        processQueue();
-        return;
-      }
-
-      clearAllSpecialExpressions();
-      playIdle();
-    });
-
-    await buildAnimationSet();
-
-    currentAction = idleActions[0];
-    currentAction.reset().play();
-
-    scheduleNextIdleSwitch();
-    lastInteractionTime = clock.getElapsedTime();
-    lastBlinkTime = clock.getElapsedTime();
-
-    currentModelIndex = modelIndex;
-    updateAgentButtonLabel();
-    log(`Готово! Активен агент: ${MODEL_FILES[currentModelIndex]}`);
-  } catch (err) {
-    console.error(err);
-    log('Ошибка: ' + err.message);
-  } finally {
-    isSwitchingModel = false;
-    updateAgentButtonLabel();
-    updateButtonStates();
+function inferExpression(reply) {
+  if (reply?.expression === 'smile' || reply?.expression === 'sorrow') {
+    return reply.expression;
   }
+
+  return 'smile';
+}
+
+function handleAgentReply(reply) {
+  const text = reply?.text || '...';
+  const animation = inferAnimation(reply);
+  const expression = inferExpression(reply);
+
+  addChatMessage(text, 'agent');
+
+  if (animation === 'none') return;
+  playSpecialAction(animation, expression);
 }
 
 function updateBlinking() {
-  if (!currentVrm?.expressionManager || isBusy || isSwitchingModel) return;
+  if (!currentVrm?.expressionManager || isBusy || isLoading) return;
 
   const now = clock.getElapsedTime();
 
   if (now - lastBlinkTime > BLINK_INTERVAL + Math.random() * 2) {
-    const expr = currentVrm.expressionManager;
-    expr.setValue('blink', 1.0);
+    currentVrm.expressionManager.setValue('blink', 1.0);
 
     setTimeout(() => {
       if (currentVrm?.expressionManager) {
@@ -639,167 +380,240 @@ function updateBlinking() {
 }
 
 function switchRandomIdle() {
-  if (isBusy || isSwitchingModel || animationQueue.length > 0) return;
+  if (isBusy || isLoading) return;
   if (!currentAction) return;
-  if (clock.getElapsedTime() < nextIdleSwitchTime) return;
   if (!idleActions.includes(currentAction)) return;
+  if (clock.getElapsedTime() < nextIdleSwitchTime) return;
 
   const nextIdle = getRandomIdle(currentAction);
 
   if (!nextIdle || nextIdle === currentAction) {
-    scheduleNextIdleSwitch();
+    nextIdleSwitchTime =
+      clock.getElapsedTime() +
+      (IDLE_MIN_TIME + Math.random() * (IDLE_MAX_TIME - IDLE_MIN_TIME));
     return;
   }
 
   currentAction.fadeOut(FADE_DURATION);
   nextIdle.reset().fadeIn(FADE_DURATION).play();
+
   currentAction = nextIdle;
 
-  scheduleNextIdleSwitch();
+  nextIdleSwitchTime =
+    clock.getElapsedTime() +
+    (IDLE_MIN_TIME + Math.random() * (IDLE_MAX_TIME - IDLE_MIN_TIME));
 }
 
 function checkAutoYawn() {
-  if (isBusy || isSwitchingModel || animationQueue.length > 0) return;
-
-  const now = clock.getElapsedTime();
-  if (now - lastInteractionTime <= YAWN_TIMEOUT / 1000) return;
+  if (isBusy || isLoading) return;
   if (!specialActions.yawn) return;
 
-  queueAnimation('yawn', null, 'sorrow');
-  lastInteractionTime = now;
+  const now = clock.getElapsedTime();
+
+  if (now - lastInteractionTime > YAWN_TIMEOUT) {
+    playSpecialAction('yawn', 'sorrow');
+    lastInteractionTime = now;
+  }
 }
 
-function addChatMessage(text, role) {
-  const div = document.createElement('div');
-  div.className = `msg ${role}`;
-  div.textContent = text;
-  chatMessages.appendChild(div);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
+// ===== API =====
+
+async function getLLMReply(userText) {
+  const res = await fetch('/api/chat', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ message: userText })
+  });
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    throw new Error(data?.error || 'LLM request failed');
+  }
+
+  return data;
 }
 
-function fakeAgentReply(userText) {
-  const clean = userText.trim().toLowerCase();
+async function getInitiativeReply() {
+  const res = await fetch('/api/initiative', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    }
+  });
 
-  if (clean.includes('груст') || clean.includes('печал')) {
-    return {
-      text: 'Я рядом. Можешь рассказать, что случилось.',
-      animation: 'talk1',
-      expression: 'sorrow'
-    };
+  const data = await res.json();
+
+  if (!res.ok) {
+    throw new Error(data?.error || 'Initiative request failed');
   }
 
-  if (clean.includes('смешно') || clean.includes('лол')) {
-    return {
-      text: 'Хах. Это правда было забавно.',
-      animation: Math.random() > 0.5 ? 'talk2' : 'talk3',
-      expression: 'fun'
-    };
-  }
-
-  if (clean.includes('привет')) {
-    return {
-      text: 'Привет. Я тебя слушаю.',
-      animation: 'talk',
-      expression: 'fun'
-    };
-  }
-
-  const talkPool = ['talk', 'talk1', 'talk2', 'talk3'];
-  const animation = talkPool[Math.floor(Math.random() * talkPool.length)];
-
-  return {
-    text: 'Я услышала: ' + userText,
-    animation,
-    expression: 'fun'
-  };
+  return data;
 }
 
-function handleAgentReply(reply) {
-  addChatMessage(reply.text, 'agent');
+function canInitiate() {
+  const now = Date.now();
 
-  if (
-    reply.animation === 'talk' ||
-    reply.animation === 'talk1' ||
-    reply.animation === 'talk2' ||
-    reply.animation === 'talk3'
-  ) {
-    interruptWithTalking(reply.animation, reply.expression, reply.text);
-    return;
-  }
+  if (isUserTyping) return false;
+  if (isBusy || isLoading) return false;
 
-  showSpeechBubble(reply.text, Math.max(2600, reply.text.length * 70));
+  if (now - lastUserMessageAt < INIT_SILENCE_MS) return false;
+  if (now - lastInitiativeAt < INIT_COOLDOWN_MS) return false;
+
+  return Math.random() <= INIT_CHANCE;
 }
 
-function handleSendMessage() {
-  const text = chatInput.value.trim();
+async function tryInitiative() {
+  if (!canInitiate()) return;
+
+  try {
+    const reply = await getInitiativeReply();
+    lastInitiativeAt = Date.now();
+    handleAgentReply(reply);
+  } catch (err) {
+    console.warn('initiative error:', err);
+  }
+}
+
+async function handleSendMessage() {
+  lastUserMessageAt = Date.now();
+
+  const text = chatInput?.value?.trim();
   if (!text) return;
 
   chatInput.value = '';
   addChatMessage(text, 'user');
 
-  const reply = fakeAgentReply(text);
-
-  setTimeout(() => {
+  try {
+    const reply = await getLLMReply(text);
     handleAgentReply(reply);
-  }, 280);
+  } catch (err) {
+    console.error(err);
+    addChatMessage(`Ошибка: ${err.message}`, 'agent');
+  }
 }
 
-buttons.switchAgent.addEventListener('click', async () => {
-  const nextIndex = (currentModelIndex + 1) % MODEL_FILES.length;
-  await loadAgent(nextIndex);
-});
+// ===== loading =====
 
-buttons.kiss.addEventListener('click', () => {
-  queueAnimation('kiss', buttons.kiss, 'fun');
-});
+async function loadModelAndAnimations() {
+  isLoading = true;
+  log('Загрузка агента...');
 
-buttons.walk.addEventListener('click', () => {
-  queueAnimation('walk', buttons.walk, 'fun');
-});
+  try {
+    await loadSkySphere(SKY_FILE);
+    await loadWorld(WORLD_FILE);
 
-buttons.rumba.addEventListener('click', () => {
-  queueAnimation('rumba', buttons.rumba, 'fun');
-});
+    const vrmGltf = await loadVRM(MODEL_FILE);
+      currentVrm = vrmGltf.userData.vrm;
 
-buttons.spin.addEventListener('click', () => {
-  queueAnimation('spin', buttons.spin, 'fun');
-});
+      if (currentVrm.springBoneManager) {
+  currentVrm.springBoneManager.reset();
+  currentVrm.springBoneManager.enabled = false;
+}
 
-buttons.belly.addEventListener('click', () => {
-  queueAnimation('belly', buttons.belly, 'fun');
-});
+    if (!currentVrm) {
+      throw new Error('VRM runtime не найден');
+    }
 
-buttons.hiphop.addEventListener('click', () => {
-  queueAnimation('hiphop', buttons.hiphop, 'fun');
-});
+    VRMUtils.removeUnnecessaryVertices(vrmGltf.scene);
+    VRMUtils.removeUnnecessaryJoints(vrmGltf.scene);
 
-buttons.jump.addEventListener('click', () => {
-  queueAnimation('jump', buttons.jump, 'fun');
-});
+    currentRoot = currentVrm.scene;
+    scene.add(currentRoot);
 
-buttons.laugh.addEventListener('click', () => {
-  queueAnimation('laugh', buttons.laugh, 'fun');
-});
+    currentRoot.position.copy(LUNA_POSITION);
+    currentRoot.scale.setScalar(LUNA_SCALE);
+    currentRoot.rotation.y = LUNA_ROTATION_Y;
 
-buttons.funnyLaugh.addEventListener('click', () => {
-  queueAnimation('funnyLaugh', buttons.funnyLaugh, 'fun');
-});
+    camera.position.copy(CAMERA_POSITION);
+    controls.target.copy(CAMERA_TARGET);
+    controls.update();
 
-buttons.excited.addEventListener('click', () => {
-  queueAnimation('excited', buttons.excited, 'fun');
-});
+    mixer = new THREE.AnimationMixer(currentRoot);
 
-buttons.cry.addEventListener('click', () => {
-  queueAnimation('cry', buttons.cry, 'sorrow');
-});
+    mixer.addEventListener('finished', (event) => {
+      if (!currentAction) return;
+      if (event.action !== currentAction) return;
 
-sendBtn.addEventListener('click', handleSendMessage);
+      stopTalkingFace();
+      clearExpressions();
+      isBusy = false;
+      playIdle();
+    });
 
-chatInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    handleSendMessage();
+    idleActions = [];
+
+    const idleFiles = [
+      'assets/animations/idle.vrma',
+      'assets/animations/happy-idle.vrma',
+      'assets/animations/happy-idle2.vrma'
+    ];
+
+    for (const file of idleFiles) {
+      const action = await loadAction(file, null, THREE.LoopRepeat, Infinity);
+      if (action) idleActions.push(action);
+    }
+
+    await loadAction('assets/animations/yawn.vrma', 'yawn', THREE.LoopOnce, 1);
+    await loadAction('assets/animations/waving.vrma', 'wave', THREE.LoopOnce, 1);
+
+    await loadAction('assets/animations/talking.vrma', 'talk', THREE.LoopOnce, 1);
+    await loadAction('assets/animations/talking1.vrma', 'talk1', THREE.LoopOnce, 1);
+    await loadAction('assets/animations/talking2.vrma', 'talk2', THREE.LoopOnce, 1);
+    await loadAction('assets/animations/talking3.vrma', 'talk3', THREE.LoopOnce, 1);
+
+    await loadAction('assets/animations/air-kiss2.vrma', 'kiss', THREE.LoopOnce, 1);
+    await loadAction('assets/animations/laugh.vrma', 'laugh', THREE.LoopOnce, 1);
+    await loadAction('assets/animations/funniest-laugh.vrma', 'funnyLaugh', THREE.LoopOnce, 1);
+    await loadAction('assets/animations/crying.vrma', 'cry', THREE.LoopOnce, 1);
+    await loadAction('assets/animations/excided.vrma', 'excited', THREE.LoopOnce, 1);
+
+    await loadAction('assets/animations/belly-dance.vrma', 'belly', THREE.LoopOnce, 1);
+    await loadAction('assets/animations/hiphop-step-dance.vrma', 'hiphop', THREE.LoopOnce, 1);
+    await loadAction('assets/animations/cross-jump.vrma', 'jump', THREE.LoopOnce, 1);
+    await loadAction('assets/animations/spin.vrma', 'spin', THREE.LoopOnce, 1);
+    await loadAction('assets/animations/walk-around.vrma', 'walk', THREE.LoopOnce, 1);
+    await loadAction('assets/animations/rumba-dance.vrma', 'rumba', THREE.LoopRepeat, 5);
+
+    playIdle(idleActions[0] || null);
+
+    lastInteractionTime = clock.getElapsedTime();
+    lastBlinkTime = clock.getElapsedTime();
+
+    log('Готово! Агент загружен.');
+  } catch (err) {
+    console.error(err);
+    log(`Ошибка загрузки: ${err.message}`);
+  } finally {
+    isLoading = false;
   }
-});
+}
+
+// ===== events =====
+
+if (sendBtn) {
+  sendBtn.addEventListener('click', handleSendMessage);
+}
+
+if (chatInput) {
+  chatInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  });
+
+  chatInput.addEventListener('input', () => {
+    isUserTyping = true;
+    clearTimeout(typingTimer);
+
+    typingTimer = setTimeout(() => {
+      isUserTyping = false;
+    }, 1500);
+  });
+}
 
 controls.addEventListener('change', () => {
   lastInteractionTime = clock.getElapsedTime();
@@ -811,14 +625,14 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+// ===== render loop =====
+
 function animate() {
   requestAnimationFrame(animate);
 
   const delta = clock.getDelta();
 
-  if (mixer) {
-    mixer.update(delta);
-  }
+  if (mixer) mixer.update(delta);
 
   if (currentVrm) {
     currentVrm.update(delta);
@@ -827,17 +641,14 @@ function animate() {
 
   switchRandomIdle();
   checkAutoYawn();
-  updateSpeechBubblePosition();
 
   controls.update();
   renderer.render(scene, camera);
 }
 
-async function main() {
-  updateAgentButtonLabel();
-  updateButtonStates();
-  await loadAgent(0);
-}
-
-main();
+loadModelAndAnimations();
 animate();
+
+setInterval(() => {
+  tryInitiative();
+}, 10000);

@@ -1,0 +1,13 @@
+{
+  "name": "vrm-agent",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "express": "^4.21.2",
+    "node-fetch": "^3.3.2"
+  }
+}

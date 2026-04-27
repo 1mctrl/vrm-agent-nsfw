@@ -1,193 +1,179 @@
-/* === БАЗА === */
+
+/* ===== базовый reset ===== */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: system-ui, sans-serif;
+}
 
 html, body {
-  margin: 0;
+  width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #eef1f7;
-  font-family: sans-serif;
+  background: #e9edf5;
 }
 
+/* ===== canvas (3D сцена) ===== */
+canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1;
+}
 
-/* === СООБЩЕНИЕ СВЕРХУ === */
-
+/* ===== статус ===== */
 #msg {
   position: fixed;
-  left: 12px;
-  top: 12px;
-  color: #fff;
-  background: rgba(0,0,0,0.7);
-  padding: 10px 14px;
-  border-radius: 8px;
-  z-index: 20;
-  white-space: pre-wrap;
-  max-width: 480px;
-  font-size: 14px;
+  top: 10px;
+  left: 10px;
+  z-index: 50;
+  font-size: 13px;
+  color: #333;
+  background: rgba(255,255,255,0.7);
+  padding: 6px 10px;
+  border-radius: 6px;
+  backdrop-filter: blur(6px);
 }
 
-
-/* === КНОПКИ ВНИЗУ === */
-
-#ui {
-  position: fixed;
-  bottom: 15px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 30;
-
-  background: rgba(0,0,0,0.8);
-  padding: 12px 18px;
-  border-radius: 14px;
-
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: center;
-
-  max-width: calc(100vw - 40px);
-}
-
-button {
-  padding: 12px 22px;
-  font-size: 15px;
-  background: #ff4d94;
-  color: white;
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: 0.15s;
-}
-
-button:hover:not(:disabled) {
-  background: #ff6eb3;
-}
-
-button:disabled {
-  background: #666;
-  cursor: not-allowed;
-}
-
-
-/* === ЧАТ СПРАВА === */
-
+/* ===== чат панель ===== */
 #chatPanel {
   position: fixed;
-  top: 20px;
   right: 20px;
-
+  bottom: 20px;
   width: 320px;
-  height: calc(100vh - 40px);
-
-  background: rgba(0,0,0,0.82);
-  border-radius: 16px;
-
-  z-index: 40;
+  height: 420px;
 
   display: flex;
   flex-direction: column;
-  overflow: hidden;
 
-  color: white;
+  background: rgba(20, 20, 25, 0.65);
+  backdrop-filter: blur(16px);
 
-  box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  border-radius: 14px;
+  padding: 12px;
+
+  z-index: 40;
+  pointer-events: auto;
 }
 
-
-/* список сообщений */
-
+/* ===== сообщения ===== */
 #chatMessages {
   flex: 1;
   overflow-y: auto;
-
-  padding: 14px;
-
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  padding-right: 6px;
+  margin-bottom: 10px;
 }
 
+/* скролл */
+#chatMessages::-webkit-scrollbar {
+  width: 6px;
+}
+#chatMessages::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.2);
+  border-radius: 4px;
+}
 
-/* строка ввода */
+/* ===== сообщения ===== */
+.msg {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.3;
+  max-width: 85%;
+  word-wrap: break-word;
+}
 
+/* пользователь */
+.msg.user {
+  background: #4c7dff;
+  color: white;
+  margin-left: auto;
+}
+
+/* агент */
+.msg.agent {
+  background: rgba(255,255,255,0.15);
+  color: #f0f0f0;
+  margin-right: auto;
+}
+
+/* ===== ввод ===== */
 #chatInputRow {
   display: flex;
   gap: 8px;
-
-  padding: 12px;
-
-  border-top: 1px solid rgba(255,255,255,0.12);
 }
 
 #chatInput {
   flex: 1;
-
+  padding: 8px 10px;
+  border-radius: 8px;
   border: none;
   outline: none;
 
-  border-radius: 10px;
-  padding: 10px 12px;
+  background: rgba(255,255,255,0.12);
+  color: white;
 
-  font-size: 14px;
+  z-index: 41;
+  pointer-events: auto;
+}
 
-  background: #ffffff;
-  color: #111;
+#chatInput::placeholder {
+  color: rgba(255,255,255,0.5);
 }
 
 #sendBtn {
-  padding: 10px 14px;
-  font-size: 14px;
-  border-radius: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+
+  background: #5a7dff;
+  color: white;
+
+  transition: 0.2s;
+
+  z-index: 41;
+  pointer-events: auto;
 }
 
-
-/* сообщения */
-
-.msg {
-  padding: 10px 12px;
-  border-radius: 12px;
-  max-width: 85%;
-  white-space: pre-wrap;
-  font-size: 14px;
-  line-height: 1.35;
+#sendBtn:hover {
+  background: #6f8fff;
 }
 
-.msg.user {
-  align-self: flex-end;
-  background: #3f6df6;
-}
-
-.msg.agent {
-  align-self: flex-start;
-  background: #2a2a33;
-}
-
-
-/* === BUBBLE НАД ГОЛОВОЙ === */
-
+/* ===== speech bubble ===== */
 #speechBubble {
   position: fixed;
-  left: 0;
-  top: 0;
+  transform: translate(-50%, -100%);
+  padding: 8px 12px;
 
-  transform: translate(-50%, -120%);
+  background: rgba(0,0,0,0.75);
+  color: white;
 
-  z-index: 50;
-
-  max-width: 280px;
-
-  background: rgba(255,255,255,0.96);
-  color: #111;
-
-  padding: 10px 14px;
-  border-radius: 14px;
-
+  border-radius: 10px;
   font-size: 14px;
-  line-height: 1.35;
-
-  box-shadow: 0 8px 28px rgba(0,0,0,0.28);
+  white-space: nowrap;
 
   pointer-events: none;
+  z-index: 45;
 
   opacity: 0;
-  transition: opacity 0.18s ease;
+  transition: opacity 0.2s;
+}
+
+/* хвост пузыря */
+#speechBubble::after {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+
+  width: 0;
+  height: 0;
+
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 6px solid rgba(0,0,0,0.75);
 }
