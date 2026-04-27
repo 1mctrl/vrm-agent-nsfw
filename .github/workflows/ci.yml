@@ -30,4 +30,4 @@ jobs:
 
       - name: Ensure private files are not tracked
         run: |
-          ! git ls-files | grep -E '(^\.env$|^memory/|\.session$|\.session-journal$|^luna-telegram/\.venv/)'
+          ! git ls-files | grep -E '(^\.env$|^memory/|^node_modules/|\.session$|\.session-journal$|^luna-telegram/\.venv/)'
