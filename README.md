@@ -29,7 +29,7 @@ Telegram аккаунт Luna:
 https://t.me/lovelyluna213
 
 ---
-
+```
 # Структура проекта
 
 .
@@ -46,7 +46,7 @@ https://t.me/lovelyluna213
 ├── styles.css
 ├── package.json
 └── .env                          # секреты, игнорируется git
-
+```
 ---
 
 # Требования
